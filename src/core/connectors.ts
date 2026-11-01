@@ -908,6 +908,12 @@ export default <ConnectorMeta[]>[
 		id: 'vagalume',
 	},
 	{
+		label: 'Radio Garden',
+		matches: ['*://radio.garden/*', '*://www.radio.garden/*'],
+		js: 'radio-garden.js',
+		id: 'radio-garden',
+	},
+	{
 		label: 'Radiooooo',
 		matches: ['*://app.radiooooo.com/*', '*://mobile.radiooooo.com/*'],
 		js: 'radiooooo.js',
