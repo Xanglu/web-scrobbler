@@ -1041,6 +1041,23 @@ type BackgroundResponse<T> =
 	  };
 
 /**
+ * Read ICY metadata from a Radio Garden station stream via the background
+ * script. Reading it in the content script is blocked by CORS for some
+ * stream servers.
+ *
+ * @param stationId - Radio Garden station ID
+ * @returns Raw ICY metadata block or null
+ */
+export function fetchIcyMetadataFromServiceWorker(
+	stationId: string,
+): Promise<string | null> {
+	return sendContentMessage({
+		type: 'fetchIcyMetadata',
+		payload: { stationId },
+	});
+}
+
+/**
  *
  * @param url - url of page to fetch
  * @param type - type of document to fetch, json/text/html

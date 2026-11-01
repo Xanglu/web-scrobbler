@@ -21,12 +21,8 @@ const STATION_TITLE_SELECTOR = [
 	'[role="contentinfo"] [dir="auto"]',
 ];
 
-const STREAM_URL = '/api/ara/content/listen/';
-const STREAM_FORMAT = 'channel.mp3';
-
 const POLL_INTERVAL = 30_000;
 const QUICK_POLL_DELAY = 1_000;
-const REQUEST_TIMEOUT = 15_000;
 
 /**
  * Number of consecutive polls with unusable metadata after which the previous
@@ -34,13 +30,6 @@ const REQUEST_TIMEOUT = 15_000;
  * forever when it stops sending `StreamTitle`.
  */
 const EMPTY_METADATA_POLLS_BEFORE_RESET = 2;
-
-/**
- * A station can use a large metadata interval, but we don't want to download
- * an unbounded amount of audio just to find the first metadata block.
- */
-const MAX_METADATA_INTERVAL = 256 * 1024;
-const MAX_STREAM_BYTES = MAX_METADATA_INTERVAL + 16 * 1024;
 
 const SEPARATORS: Separator[] = [' -- ', ' - ', ' – ', ' — ', ' | ', ' • '];
 
@@ -55,7 +44,6 @@ let currentStationId: string | null = null;
 let icyTrack: IcyTrack | null = null;
 let icyRawTitle: string | null = null;
 let emptyMetadataPolls = 0;
-let fetchController: AbortController | null = null;
 let pollTimer: number | null = null;
 let quickPollTimer: number | null = null;
 let isFetching = false;
@@ -112,7 +100,7 @@ function startPolling(): void {
 }
 
 /**
- * Stop polling and abort an in-flight stream request.
+ * Stop polling.
  */
 function stopPolling(): void {
 	if (pollTimer !== null) {
@@ -123,8 +111,6 @@ function stopPolling(): void {
 		window.clearTimeout(quickPollTimer);
 		quickPollTimer = null;
 	}
-
-	fetchController?.abort();
 }
 
 /**
@@ -200,7 +186,8 @@ async function pollMetadata(): Promise<void> {
 			return;
 		}
 
-		const rawMetadata = await readIcyMetadata(stationId);
+		const rawMetadata =
+			await Util.fetchIcyMetadataFromServiceWorker(stationId);
 		if (rawMetadata === null) {
 			return;
 		}
@@ -260,9 +247,6 @@ function updateStation(stationId: string | null): void {
 	icyRawTitle = null;
 	emptyMetadataPolls = 0;
 
-	// Stop reading an old station's stream.
-	fetchController?.abort();
-
 	if (hadMetadata) {
 		Connector.onStateChanged();
 	}
@@ -305,130 +289,6 @@ function getStationId(): string | null {
 	}
 
 	return stored.replace(/^"|"$/g, '') || null;
-}
-
-/**
- * Read the first ICY metadata block from a station stream.
- * @param stationId - ID of the station
- * @returns Raw metadata block or null if it could not be read
- */
-async function readIcyMetadata(stationId: string): Promise<string | null> {
-	const url = `${STREAM_URL}${encodeURIComponent(stationId)}/${STREAM_FORMAT}`;
-	const controller = new AbortController();
-	fetchController = controller;
-
-	const timeout = window.setTimeout(
-		() => controller.abort(),
-		REQUEST_TIMEOUT,
-	);
-	let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
-
-	try {
-		const response = await fetch(url, {
-			headers: {
-				'Icy-MetaData': '1',
-			},
-			signal: controller.signal,
-			cache: 'no-store',
-		});
-
-		if (!response.ok || !response.body) {
-			return null;
-		}
-
-		const metaint = Number.parseInt(
-			response.headers.get('icy-metaint') ?? '',
-			10,
-		);
-		if (
-			!Number.isFinite(metaint) ||
-			metaint <= 0 ||
-			metaint > MAX_METADATA_INTERVAL
-		) {
-			return null;
-		}
-
-		reader = response.body.getReader();
-
-		const chunks: Uint8Array[] = [];
-		let received = 0;
-
-		while (received < MAX_STREAM_BYTES) {
-			const { value, done } = await reader.read();
-			if (done || !value) {
-				break;
-			}
-
-			chunks.push(value);
-			received += value.byteLength;
-
-			if (received < metaint + 1) {
-				continue;
-			}
-
-			const buffer = concatChunks(chunks, received);
-			const metadataLength = buffer[metaint] * 16;
-			const metadataEnd = metaint + 1 + metadataLength;
-
-			if (received >= metadataEnd) {
-				return decodeIcyText(buffer.subarray(metaint + 1, metadataEnd));
-			}
-		}
-
-		return null;
-	} catch {
-		// Aborted requests, CORS errors and network failures are expected when
-		// a station goes offline or the user switches stations.
-		return null;
-	} finally {
-		window.clearTimeout(timeout);
-
-		if (reader) {
-			try {
-				await reader.cancel();
-			} catch {
-				// The stream may already be closed.
-			}
-		}
-
-		if (fetchController === controller) {
-			fetchController = null;
-		}
-	}
-}
-
-/**
- * Concatenate the received chunks into a single buffer.
- * @param chunks - Received chunks
- * @param length - Total length of the chunks
- * @returns Concatenated buffer
- */
-function concatChunks(chunks: Uint8Array[], length: number): Uint8Array {
-	const buffer = new Uint8Array(length);
-	let offset = 0;
-
-	for (const chunk of chunks) {
-		buffer.set(chunk, offset);
-		offset += chunk.byteLength;
-	}
-
-	return buffer;
-}
-
-/**
- * Decode an ICY metadata block.
- * @param bytes - Raw metadata bytes, padded with null bytes
- * @returns Decoded metadata
- */
-function decodeIcyText(bytes: Uint8Array): string {
-	let text = new TextDecoder('utf-8').decode(bytes);
-
-	// Most stations send UTF-8, but some still use a single-byte encoding.
-	if (text.includes('\uFFFD')) {
-		text = new TextDecoder('windows-1252').decode(bytes);
-	}
-
-	return text.replace(/\0/g, '').replace(/\s+/g, ' ').trim();
 }
 
 /**

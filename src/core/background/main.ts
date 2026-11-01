@@ -48,6 +48,7 @@ import {
 } from './scrobble';
 import scrobbleService from '../object/scrobble-service';
 import { fetchListenBrainzProfile } from '@/util/util';
+import fetchIcyMetadata from '@/util/icy';
 
 const disabledTabs = BrowserStorage.getStorage(BrowserStorage.DISABLED_TABS);
 
@@ -514,6 +515,16 @@ setupBackgroundListeners(
 				content: await res.text(),
 			};
 		},
+	}),
+
+	/**
+	 * Listener called by a content script to read ICY metadata from a Radio
+	 * Garden station stream. This has to run in the background so it is not
+	 * blocked by the stream server's CORS policy.
+	 */
+	backgroundListener({
+		type: 'fetchIcyMetadata',
+		fn: async ({ stationId }) => fetchIcyMetadata(stationId),
 	}),
 
 	/**

@@ -118,6 +118,12 @@ interface ContentCommunications {
 			content: string;
 		};
 	};
+	fetchIcyMetadata: {
+		payload: {
+			stationId: string;
+		};
+		response: string | null;
+	};
 	isTabAudible: {
 		payload: undefined;
 		response: boolean;
